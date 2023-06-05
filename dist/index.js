@@ -46,10 +46,9 @@ const path_1 = __nccwpck_require__(1017);
 function run() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            core.setOutput('update', false);
-            const packagesString = core.getInput('packages');
+            core.setOutput('update', 'false');
+            const packages = core.getInput('packages').split(/\r|\n/);
             const token = core.getInput('token');
-            const packages = packagesString.split(',');
             const octokit = github.getOctokit(token);
             const { data: patchFiles } = yield octokit.rest.repos.getContent({
                 owner: 'jayree',
@@ -88,7 +87,7 @@ function run() {
                         else {
                             core.info(`new patch for '${pkg}' found.`);
                             yield (0, promises_1.writeFile)(patchFile.path, patchContent);
-                            core.setOutput('update', true);
+                            core.setOutput('update', 'true');
                         }
                     }
                 }

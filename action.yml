@@ -1,4 +1,4 @@
-name: 'update-patches'
+name: 'update-patch-files'
 description: 'Provide a description here'
 author: 'Your name or organization here'
 inputs:

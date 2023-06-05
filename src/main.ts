@@ -6,9 +6,8 @@ import {join} from 'path'
 async function run(): Promise<void> {
   try {
     core.setOutput('update', 'false')
-    const packagesString: string = core.getInput('packages')
+    const packages: string[] = core.getInput('packages').split(/\r|\n/)
     const token: string = core.getInput('token')
-    const packages = packagesString.split(',')
 
     const octokit = github.getOctokit(token)
     const {data: patchFiles} = await octokit.rest.repos.getContent({
