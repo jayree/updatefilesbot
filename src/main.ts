@@ -30,135 +30,144 @@ async function run(): Promise<void> {
       const repo = repository.name
 
       try {
-        const {data: patchFiles} = await octokit.repos.getContent({
+        // throws error if no 'patches' doesn't exist
+        await octokit.repos.getContent({
           owner,
           repo,
           path: 'patches'
         })
 
-        if (Array.isArray(patchFiles)) {
-          core.info(`${owner}/${repo}`)
+        core.info(`${owner}/${repo}`)
 
-          const masterPatchFiles = await readdir('patches')
+        const masterPatchFiles = await readdir('patches')
 
-          const packages = masterPatchFiles.map(patch => {
-            const lastPlusIndex = patch.lastIndexOf('+')
-            return patch.substring(0, lastPlusIndex)
-          })
+        const packages = masterPatchFiles.map(patch => {
+          const lastPlusIndex = patch.lastIndexOf('+')
+          return patch.substring(0, lastPlusIndex)
+        })
 
-          for (const pkg of packages) {
-            const masterPatchFile = masterPatchFiles.find(file =>
-              file.startsWith(pkg)
-            )
+        for (const pkg of packages) {
+          const masterPatchFile = masterPatchFiles.find(file =>
+            file.startsWith(pkg)
+          ) as string
 
-            if (!masterPatchFile) {
-              core.warning(`no master patch for '${pkg}' found.`)
-              break
-            }
+          const masterFilePath = join('patches', masterPatchFile)
 
-            const patchFile = patchFiles.find(file => file.name.startsWith(pkg))
+          const masterPatchContent = (await readFile(masterFilePath)).toString(
+            'utf8'
+          )
 
-            if (!patchFile) {
-              core.warning(`no patch for '${pkg}' found.`)
-              break
-            }
+          let branchExists = undefined
 
-            const {data: patch} = await octokit.repos.getContent({
+          const pkgBranch = `updatepatchfilesbot-${pkg}`
+
+          try {
+            branchExists = await octokit.repos.getBranch({
               owner,
               repo,
-              path: patchFile.path
+              branch: pkgBranch
             })
+          } catch (error) {
+            /* empty */
+          }
 
-            if ('content' in patch && patch.type === 'file') {
-              const patchContent =
-                Buffer.from(patch.content, 'base64').toString('utf8') || ''
-              const masterFilePath = join('patches', masterPatchFile)
+          const patchFiles = (
+            await octokit.repos.getContent({
+              owner,
+              repo,
+              ref: branchExists ? `heads/${pkgBranch}` : `heads/main`,
+              path: 'patches'
+            })
+          ).data as {name: string; path: string; sha: string}[]
 
-              const masterPatchContent = (
-                await readFile(masterFilePath)
-              ).toString('utf8')
-              if (patchContent === masterPatchContent) {
-                core.info(`no new patch for package '${pkg}' found.`)
+          if (!patchFiles.find(file => file.name.startsWith(pkg))) {
+            core.warning(`no patch for '${pkg}' found.`)
+            continue
+          }
+
+          const patchFile = patchFiles.find(
+            file => file.name.startsWith(pkg) && file.path === masterFilePath
+          )
+
+          if (patchFile) {
+            const patch = (
+              await octokit.repos.getContent({
+                owner,
+                repo,
+                ref: branchExists ? `heads/${pkgBranch}` : `heads/main`,
+                path: patchFile.path
+              })
+            ).data as {content: string}
+
+            const patchContent =
+              Buffer.from(patch.content, 'base64').toString('utf8') || ''
+
+            if (patchContent === masterPatchContent) {
+              if (branchExists) {
+                core.info(`no updated patch for package '${pkg}' found.`)
               } else {
-                const mainSHA = (
-                  await octokit.git.getRef({
-                    owner,
-                    repo,
-                    ref: `heads/main`
-                  })
-                ).data.object.sha
-
-                let branchExists = undefined
-
-                const pkgBranch = `updatepatchfilesbot-${pkg}`
-
-                try {
-                  branchExists = await octokit.repos.getBranch({
-                    owner,
-                    repo,
-                    branch: pkgBranch
-                  })
-                } catch (error) {
-                  /* empty */
-                }
-
-                if (branchExists) {
-                  await octokit.git.updateRef({
-                    owner,
-                    repo,
-                    ref: `heads/${pkgBranch}`,
-                    sha: mainSHA,
-                    force: true
-                  })
-
-                  core.info(`reset branch '${pkgBranch}'.`)
-                } else {
-                  // Falls der Branch nicht existiert, erstelle einen neuen Branch aus "main"
-                  await octokit.git.createRef({
-                    owner,
-                    repo,
-                    ref: `refs/heads/${pkgBranch}`,
-                    sha: mainSHA
-                  })
-                  core.info(`create branch '${pkgBranch}'.`)
-                }
-
-                if (masterFilePath !== patchFile.path) {
-                  await octokit.repos.deleteFile({
-                    owner,
-                    repo,
-                    path: patchFile.path,
-                    message: `chore(patch): remove obsolete patch ${patchFile.path}`,
-                    sha: patchFile.sha,
-                    branch: pkgBranch
-                  })
-                }
-
-                core.info(`update patch '${pkg}'`)
-                await octokit.repos.createOrUpdateFileContents({
-                  owner,
-                  repo,
-                  path: masterFilePath,
-                  message: `chore(patch): update patch ${masterFilePath}`,
-                  content: Buffer.from(masterPatchContent).toString('base64'),
-                  sha: patchFile.sha,
-                  branch: pkgBranch
-                })
-
-                try {
-                  await octokit.pulls.create({
-                    owner,
-                    repo,
-                    title: `chore(patch): update patch ${masterFilePath}`,
-                    head: pkgBranch,
-                    base: 'main',
-                    body: `update patch file for package: ${pkg}`
-                  })
-                } catch (error) {
-                  /* empty */
-                }
+                core.info(`no new patch for package '${pkg}' found.`)
               }
+              continue
             }
+          }
+
+          if (!branchExists) {
+            const mainSHA = (
+              await octokit.git.getRef({
+                owner,
+                repo,
+                ref: `heads/main`
+              })
+            ).data.object.sha
+            await octokit.git.createRef({
+              owner,
+              repo,
+              ref: `refs/heads/${pkgBranch}`,
+              sha: mainSHA
+            })
+            core.info(`create branch '${pkgBranch}'.`)
+          }
+
+          const obsoletePatchFile = patchFiles.find(
+            file => file.name.startsWith(pkg) && file.path !== masterFilePath
+          )
+
+          if (obsoletePatchFile) {
+            await octokit.repos.deleteFile({
+              owner,
+              repo,
+              path: obsoletePatchFile.path,
+              message: `chore(patch): remove obsolete patch ${obsoletePatchFile.path}`,
+              sha: obsoletePatchFile.sha,
+              branch: pkgBranch
+            })
+            core.info(`create patch '${pkg}'`)
+          } else {
+            core.info(`update patch '${pkg}'`)
+          }
+
+          await octokit.repos.createOrUpdateFileContents({
+            owner,
+            repo,
+            path: masterFilePath,
+            message: `chore(patch): update patch ${masterFilePath}`,
+            content: Buffer.from(masterPatchContent).toString('base64'),
+            sha: patchFile?.sha,
+            branch: pkgBranch
+          })
+
+          try {
+            await octokit.pulls.create({
+              owner,
+              repo,
+              title: `chore(patch): update patch ${masterFilePath}`,
+              head: pkgBranch,
+              base: 'main',
+              body: `update patch file for package: ${pkg}`
+            })
+          } catch (error) {
+            /* empty */
           }
         }
       } catch (err) {

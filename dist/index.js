@@ -63,114 +63,113 @@ function run() {
                 const owner = repository.owner.login;
                 const repo = repository.name;
                 try {
-                    const { data: patchFiles } = yield octokit.repos.getContent({
+                    // throws error if no 'patches' doesn't exist
+                    yield octokit.repos.getContent({
                         owner,
                         repo,
                         path: 'patches'
                     });
-                    if (Array.isArray(patchFiles)) {
-                        core.info(`${owner}/${repo}`);
-                        const masterPatchFiles = yield (0, promises_1.readdir)('patches');
-                        const packages = masterPatchFiles.map(patch => {
-                            const lastPlusIndex = patch.lastIndexOf('+');
-                            return patch.substring(0, lastPlusIndex);
-                        });
-                        for (const pkg of packages) {
-                            const masterPatchFile = masterPatchFiles.find(file => file.startsWith(pkg));
-                            if (!masterPatchFile) {
-                                core.warning(`no master patch for '${pkg}' found.`);
-                                break;
-                            }
-                            const patchFile = patchFiles.find(file => file.name.startsWith(pkg));
-                            if (!patchFile) {
-                                core.warning(`no patch for '${pkg}' found.`);
-                                break;
-                            }
-                            const { data: patch } = yield octokit.repos.getContent({
+                    core.info(`${owner}/${repo}`);
+                    const masterPatchFiles = yield (0, promises_1.readdir)('patches');
+                    const packages = masterPatchFiles.map(patch => {
+                        const lastPlusIndex = patch.lastIndexOf('+');
+                        return patch.substring(0, lastPlusIndex);
+                    });
+                    for (const pkg of packages) {
+                        const masterPatchFile = masterPatchFiles.find(file => file.startsWith(pkg));
+                        const masterFilePath = (0, path_1.join)('patches', masterPatchFile);
+                        const masterPatchContent = (yield (0, promises_1.readFile)(masterFilePath)).toString('utf8');
+                        let branchExists = undefined;
+                        const pkgBranch = `updatepatchfilesbot-${pkg}`;
+                        try {
+                            branchExists = yield octokit.repos.getBranch({
                                 owner,
                                 repo,
-                                path: patchFile.path
+                                branch: pkgBranch
                             });
-                            if ('content' in patch && patch.type === 'file') {
-                                const patchContent = Buffer.from(patch.content, 'base64').toString('utf8') || '';
-                                const masterFilePath = (0, path_1.join)('patches', masterPatchFile);
-                                const masterPatchContent = (yield (0, promises_1.readFile)(masterFilePath)).toString('utf8');
-                                if (patchContent === masterPatchContent) {
-                                    core.info(`no new patch for package '${pkg}' found.`);
+                        }
+                        catch (error) {
+                            /* empty */
+                        }
+                        const patchFiles = (yield octokit.repos.getContent({
+                            owner,
+                            repo,
+                            ref: branchExists ? `heads/${pkgBranch}` : `heads/main`,
+                            path: 'patches'
+                        })).data;
+                        if (!patchFiles.find(file => file.name.startsWith(pkg))) {
+                            core.warning(`no patch for '${pkg}' found.`);
+                            continue;
+                        }
+                        const patchFile = patchFiles.find(file => file.name.startsWith(pkg) && file.path === masterFilePath);
+                        if (patchFile) {
+                            const patch = (yield octokit.repos.getContent({
+                                owner,
+                                repo,
+                                ref: branchExists ? `heads/${pkgBranch}` : `heads/main`,
+                                path: patchFile.path
+                            })).data;
+                            const patchContent = Buffer.from(patch.content, 'base64').toString('utf8') || '';
+                            if (patchContent === masterPatchContent) {
+                                if (branchExists) {
+                                    core.info(`no updated patch for package '${pkg}' found.`);
                                 }
                                 else {
-                                    const mainSHA = (yield octokit.git.getRef({
-                                        owner,
-                                        repo,
-                                        ref: `heads/main`
-                                    })).data.object.sha;
-                                    let branchExists = undefined;
-                                    const pkgBranch = `updatepatchfilesbot-${pkg}`;
-                                    try {
-                                        branchExists = yield octokit.repos.getBranch({
-                                            owner,
-                                            repo,
-                                            branch: pkgBranch
-                                        });
-                                    }
-                                    catch (error) {
-                                        /* empty */
-                                    }
-                                    if (branchExists) {
-                                        yield octokit.git.updateRef({
-                                            owner,
-                                            repo,
-                                            ref: `heads/${pkgBranch}`,
-                                            sha: mainSHA,
-                                            force: true
-                                        });
-                                        core.info(`reset branch '${pkgBranch}'.`);
-                                    }
-                                    else {
-                                        // Falls der Branch nicht existiert, erstelle einen neuen Branch aus "main"
-                                        yield octokit.git.createRef({
-                                            owner,
-                                            repo,
-                                            ref: `refs/heads/${pkgBranch}`,
-                                            sha: mainSHA
-                                        });
-                                        core.info(`create branch '${pkgBranch}'.`);
-                                    }
-                                    if (masterFilePath !== patchFile.path) {
-                                        yield octokit.repos.deleteFile({
-                                            owner,
-                                            repo,
-                                            path: patchFile.path,
-                                            message: `chore(patch): remove obsolete patch ${patchFile.path}`,
-                                            sha: patchFile.sha,
-                                            branch: pkgBranch
-                                        });
-                                    }
-                                    core.info(`update patch '${pkg}'`);
-                                    yield octokit.repos.createOrUpdateFileContents({
-                                        owner,
-                                        repo,
-                                        path: masterFilePath,
-                                        message: `chore(patch): update patch ${masterFilePath}`,
-                                        content: Buffer.from(masterPatchContent).toString('base64'),
-                                        sha: patchFile.sha,
-                                        branch: pkgBranch
-                                    });
-                                    try {
-                                        yield octokit.pulls.create({
-                                            owner,
-                                            repo,
-                                            title: `chore(patch): update patch ${masterFilePath}`,
-                                            head: pkgBranch,
-                                            base: 'main',
-                                            body: `update patch file for package: ${pkg}`
-                                        });
-                                    }
-                                    catch (error) {
-                                        /* empty */
-                                    }
+                                    core.info(`no new patch for package '${pkg}' found.`);
                                 }
+                                continue;
                             }
+                        }
+                        if (!branchExists) {
+                            const mainSHA = (yield octokit.git.getRef({
+                                owner,
+                                repo,
+                                ref: `heads/main`
+                            })).data.object.sha;
+                            yield octokit.git.createRef({
+                                owner,
+                                repo,
+                                ref: `refs/heads/${pkgBranch}`,
+                                sha: mainSHA
+                            });
+                            core.info(`create branch '${pkgBranch}'.`);
+                        }
+                        const obsoletePatchFile = patchFiles.find(file => file.name.startsWith(pkg) && file.path !== masterFilePath);
+                        if (obsoletePatchFile) {
+                            yield octokit.repos.deleteFile({
+                                owner,
+                                repo,
+                                path: obsoletePatchFile.path,
+                                message: `chore(patch): remove obsolete patch ${obsoletePatchFile.path}`,
+                                sha: obsoletePatchFile.sha,
+                                branch: pkgBranch
+                            });
+                            core.info(`create patch '${pkg}'`);
+                        }
+                        else {
+                            core.info(`update patch '${pkg}'`);
+                        }
+                        yield octokit.repos.createOrUpdateFileContents({
+                            owner,
+                            repo,
+                            path: masterFilePath,
+                            message: `chore(patch): update patch ${masterFilePath}`,
+                            content: Buffer.from(masterPatchContent).toString('base64'),
+                            sha: patchFile === null || patchFile === void 0 ? void 0 : patchFile.sha,
+                            branch: pkgBranch
+                        });
+                        try {
+                            yield octokit.pulls.create({
+                                owner,
+                                repo,
+                                title: `chore(patch): update patch ${masterFilePath}`,
+                                head: pkgBranch,
+                                base: 'main',
+                                body: `update patch file for package: ${pkg}`
+                            });
+                        }
+                        catch (error) {
+                            /* empty */
                         }
                     }
                 }
