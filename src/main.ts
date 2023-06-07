@@ -138,7 +138,7 @@ async function run(): Promise<void> {
               owner,
               repo,
               path: obsoletePatchFile.path,
-              message: `chore(patch): remove obsolete patch ${obsoletePatchFile.path}`,
+              message: `chore(patch): remove obsolete patch ${obsoletePatchFile.name}`,
               sha: obsoletePatchFile.sha,
               branch: pkgBranch
             })
@@ -151,7 +151,7 @@ async function run(): Promise<void> {
             owner,
             repo,
             path: masterFilePath,
-            message: `chore(patch): update patch ${masterFilePath}`,
+            message: `chore(patch): update patch ${masterPatchFile}`,
             content: Buffer.from(masterPatchContent).toString('base64'),
             sha: patchFile?.sha,
             branch: pkgBranch
@@ -161,7 +161,7 @@ async function run(): Promise<void> {
             await octokit.pulls.create({
               owner,
               repo,
-              title: `chore(patch): update patch ${masterFilePath}`,
+              title: `chore(patch): update patch ${masterPatchFile}`,
               head: pkgBranch,
               base: 'main',
               body: `update patch file for package: ${pkg}`

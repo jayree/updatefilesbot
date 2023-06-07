@@ -140,7 +140,7 @@ function run() {
                                 owner,
                                 repo,
                                 path: obsoletePatchFile.path,
-                                message: `chore(patch): remove obsolete patch ${obsoletePatchFile.path}`,
+                                message: `chore(patch): remove obsolete patch ${obsoletePatchFile.name}`,
                                 sha: obsoletePatchFile.sha,
                                 branch: pkgBranch
                             });
@@ -153,7 +153,7 @@ function run() {
                             owner,
                             repo,
                             path: masterFilePath,
-                            message: `chore(patch): update patch ${masterFilePath}`,
+                            message: `chore(patch): update patch ${masterPatchFile}`,
                             content: Buffer.from(masterPatchContent).toString('base64'),
                             sha: patchFile === null || patchFile === void 0 ? void 0 : patchFile.sha,
                             branch: pkgBranch
@@ -162,7 +162,7 @@ function run() {
                             yield octokit.pulls.create({
                                 owner,
                                 repo,
-                                title: `chore(patch): update patch ${masterFilePath}`,
+                                title: `chore(patch): update patch ${masterPatchFile}`,
                                 head: pkgBranch,
                                 base: 'main',
                                 body: `update patch file for package: ${pkg}`
