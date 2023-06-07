@@ -1,16 +1,16 @@
 name: 'update-patch-files'
-description: 'Provide a description here'
-author: 'Your name or organization here'
+description: 'This GitHub Action updates patch files in a repository using a GitHub App.'
+author: 'jayree'
 inputs:
-  packages:
+  GitHubAppId:
     required: true
-    description: 'input description here'
-  token:
+    description: 'The ID of the GitHub App that has access to the repository.'
+  GitHubAppPrivateKey:
     required: true
-    description: 'input description here'
-outputs:
-  update:
-    description: 'output description here'
+    description: 'The private key associated with the GitHub App.'
+  GitHubAppInstallationId:
+    required: true
+    description: 'The installation ID of the GitHub App.'
 runs:
   using: 'node16'
   main: 'dist/index.js'
