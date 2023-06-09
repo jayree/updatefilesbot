@@ -77,7 +77,7 @@ async function run(): Promise<void> {
             ).data as {name: string; path: string; sha: string}[]
 
             if (!patchFiles.find(file => file.name.startsWith(pkg))) {
-              core.warning(`no patch for '${pkg}' found.`)
+              core.info(`no patch for '${pkg}' found.`)
               continue
             }
 

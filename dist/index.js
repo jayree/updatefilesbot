@@ -114,7 +114,7 @@ function run() {
                                         path: 'patches'
                                     })).data;
                                     if (!patchFiles.find(file => file.name.startsWith(pkg))) {
-                                        core.warning(`no patch for '${pkg}' found.`);
+                                        core.info(`no patch for '${pkg}' found.`);
                                         continue;
                                     }
                                     const patchFile = patchFiles.find(file => file.name.startsWith(pkg) && file.path === masterFilePath);
