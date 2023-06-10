@@ -8,9 +8,6 @@ inputs:
   GitHubAppPrivateKey:
     required: true
     description: 'The private key associated with the GitHub App.'
-  GitHubAppInstallationId:
-    required: true
-    description: 'The installation ID of the GitHub App.'
 runs:
   using: 'node16'
   main: 'dist/index.js'
