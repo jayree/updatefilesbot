@@ -56,6 +56,7 @@ async function run(): Promise<void> {
             let branchExists = undefined
 
             const pkgBranch = `updatepatchfilesbot-${pkg}`
+            const pkgName = pkg.split('+').join('/')
 
             try {
               branchExists = await octokit.repos.getBranch({
@@ -77,7 +78,7 @@ async function run(): Promise<void> {
             ).data as {name: string; path: string; sha: string}[]
 
             if (!patchFiles.find(file => file.name.startsWith(pkg))) {
-              core.info(`no patch for '${pkg}' found.`)
+              core.info(`no patch for '${pkgName}' found.`)
               continue
             }
 
@@ -100,9 +101,9 @@ async function run(): Promise<void> {
 
               if (patchContent === masterPatchContent) {
                 if (branchExists) {
-                  core.info(`no updated patch for package '${pkg}' found.`)
+                  core.info(`no updated patch for package '${pkgName}' found.`)
                 } else {
-                  core.info(`no new patch for package '${pkg}' found.`)
+                  core.info(`no new patch for package '${pkgName}' found.`)
                 }
                 continue
               }
@@ -134,20 +135,20 @@ async function run(): Promise<void> {
                 owner,
                 repo,
                 path: obsoletePatchFile.path,
-                message: `chore(patch): remove obsolete patch ${obsoletePatchFile.name}`,
+                message: `chore(patch): remove obsolete patch for package ${pkgName}`,
                 sha: obsoletePatchFile.sha,
                 branch: pkgBranch
               })
-              core.info(`create patch '${pkg}'`)
+              core.info(`create patch for pgk '${pkgName}'`)
             } else {
-              core.info(`update patch '${pkg}'`)
+              core.info(`update patch for pkg '${pkgName}'`)
             }
 
             await octokit.repos.createOrUpdateFileContents({
               owner,
               repo,
               path: masterFilePath,
-              message: `chore(patch): update patch ${masterPatchFile}`,
+              message: `chore(patch): update patch for package ${pkgName}`,
               content: Buffer.from(masterPatchContent).toString('base64'),
               sha: patchFile?.sha,
               branch: pkgBranch
@@ -157,10 +158,9 @@ async function run(): Promise<void> {
               await octokit.pulls.create({
                 owner,
                 repo,
-                title: `chore(patch): update patch ${masterPatchFile}`,
+                title: `chore(patch): update patch for package ${pkgName}`,
                 head: pkgBranch,
-                base: 'main',
-                body: `update patch file for package: ${pkg}`
+                base: 'main'
               })
             } catch (error) {
               /* empty */
