@@ -8,6 +8,9 @@ inputs:
   GitHubAppPrivateKey:
     required: true
     description: 'The private key associated with the GitHub App.'
+  ForcePkgNames:
+    required: false
+    description: 'The package names which should be forced.'
 runs:
   using: 'node16'
   main: 'dist/index.js'

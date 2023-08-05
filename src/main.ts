@@ -6,6 +6,15 @@ import {join} from 'path'
 
 async function run(): Promise<void> {
   try {
+    const forcePkgNames: string = core.getInput('ForcePkgNames')
+
+    const forcePkgArray = forcePkgNames
+      .split(',')
+      .map(item => item.trim())
+      .filter(item => item.length > 0)
+
+    core.info(`force Package: ${forcePkgArray.toString()}`)
+
     const GitHubAppId: string = core.getInput('GitHubAppId')
     const GitHubAppPrivateKey: string = core.getInput('GitHubAppPrivateKey')
 
@@ -79,7 +88,9 @@ async function run(): Promise<void> {
 
             if (!patchFiles.find(file => file.name.startsWith(pkg))) {
               core.info(`no patch for '${pkgName}' found.`)
-              continue
+              if (!forcePkgArray.includes(pkg)) {
+                continue
+              }
             }
 
             const patchFile = patchFiles.find(

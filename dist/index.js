@@ -55,6 +55,12 @@ function run() {
     var _a, e_1, _b, _c, _d, e_2, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
         try {
+            const forcePkgNames = core.getInput('ForcePkgNames');
+            const forcePkgArray = forcePkgNames
+                .split(',')
+                .map(item => item.trim())
+                .filter(item => item.length > 0);
+            core.info(`force Package: ${forcePkgArray.toString()}`);
             const GitHubAppId = core.getInput('GitHubAppId');
             const GitHubAppPrivateKey = core.getInput('GitHubAppPrivateKey');
             const app = new app_1.App({
@@ -116,7 +122,9 @@ function run() {
                                     })).data;
                                     if (!patchFiles.find(file => file.name.startsWith(pkg))) {
                                         core.info(`no patch for '${pkgName}' found.`);
-                                        continue;
+                                        if (!forcePkgArray.includes(pkg)) {
+                                            continue;
+                                        }
                                     }
                                     const patchFile = patchFiles.find(file => file.name.startsWith(pkg) && file.path === masterFilePath);
                                     if (patchFile) {
