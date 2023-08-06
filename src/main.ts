@@ -48,10 +48,14 @@ async function run(): Promise<void> {
 
           const packages = masterPatchFiles.map(patch => {
             const lastPlusIndex = patch.lastIndexOf('+')
-            return patch.substring(0, lastPlusIndex)
+            const lastDotIndex = patch.lastIndexOf('.')
+            return {
+              pkg: patch.substring(0, lastPlusIndex),
+              version: patch.substring(lastPlusIndex + 1, lastDotIndex)
+            }
           })
 
-          for (const pkg of packages) {
+          for (const {pkg, version} of packages) {
             const masterPatchFile = masterPatchFiles.find(file =>
               file.startsWith(pkg)
             ) as string
@@ -64,8 +68,53 @@ async function run(): Promise<void> {
 
             let branchExists = undefined
 
-            const pkgBranch = `updatepatchfilesbot-${pkg}`
+            let pkgBranch = `updatepatchfilesbot-${pkg}`
             const pkgName = pkg.split('+').join('/')
+
+            const deBotBranch = `dependabot-npm_and_yarn-${pkg
+              .replace('@', '')
+              .replace('+', '-')}-${version}`
+
+            try {
+              const pullsList = await octokit.pulls.list({
+                owner,
+                repo,
+                state: 'open',
+                base: 'main'
+              })
+
+              const existingDeBotPullRequest = pullsList.data.find(
+                pr => pr.head.ref === deBotBranch
+              )
+
+              if (existingDeBotPullRequest) {
+                const existingPkgPullRequest = pullsList.data.find(
+                  pr => pr.head.ref === pkgBranch
+                )
+
+                if (existingPkgPullRequest) {
+                  core.info(`try to detect pkg pr: ${pkgBranch}`)
+
+                  await octokit.pulls.update({
+                    owner,
+                    repo,
+                    pull_number: existingPkgPullRequest.number,
+                    state: 'closed'
+                  })
+                  await octokit.git.deleteRef({
+                    owner,
+                    repo,
+                    ref: `heads/${pkgBranch}`
+                  })
+                  core.info(`deleted branch ${pkgBranch} and closed pr`)
+                }
+
+                pkgBranch = deBotBranch
+                core.info(`use dependabot pr branch ${deBotBranch}`)
+              }
+            } catch (error) {
+              /* empty */
+            }
 
             try {
               branchExists = await octokit.repos.getBranch({
