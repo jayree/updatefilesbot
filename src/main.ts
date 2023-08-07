@@ -3,6 +3,7 @@ import {App} from '@octokit/app'
 import {Octokit} from '@octokit/rest'
 import {readdir, readFile} from 'fs/promises'
 import {join} from 'path'
+import fetch from 'node-fetch'
 
 async function run(): Promise<void> {
   try {
@@ -21,21 +22,36 @@ async function run(): Promise<void> {
     const app = new App({
       appId: GitHubAppId,
       privateKey: Buffer.from(GitHubAppPrivateKey, 'base64').toString(),
-      Octokit: Octokit.defaults({})
+      Octokit: Octokit.defaults({
+        request: {
+          fetch
+        }
+      })
     })
 
     const {data} = await app.octokit.request('/app')
     core.info(`authenticated as ${data.name}`)
 
+    const masterRepoPatchFiles = await readdir('patches')
+
+    const packages = masterRepoPatchFiles.map(patch => {
+      const lastPlusIndex = patch.lastIndexOf('+')
+      const lastDotIndex = patch.lastIndexOf('.')
+      return {
+        pkg: patch.substring(0, lastPlusIndex),
+        version: patch.substring(lastPlusIndex + 1, lastDotIndex)
+      }
+    })
+
     for await (const {installation} of app.eachInstallation.iterator()) {
       for await (const {octokit, repository} of app.eachRepository.iterator({
         installationId: installation.id
       })) {
-        const owner = repository.owner.login
-        const repo = repository.name
-
         try {
-          // throws error if no 'patches' doesn't exist
+          const owner = repository.owner.login
+          const repo = repository.name
+
+          // throws error if 'patches' folder doesn't exist
           await octokit.repos.getContent({
             owner,
             repo,
@@ -44,19 +60,8 @@ async function run(): Promise<void> {
 
           core.info(`${owner}/${repo}`)
 
-          const masterPatchFiles = await readdir('patches')
-
-          const packages = masterPatchFiles.map(patch => {
-            const lastPlusIndex = patch.lastIndexOf('+')
-            const lastDotIndex = patch.lastIndexOf('.')
-            return {
-              pkg: patch.substring(0, lastPlusIndex),
-              version: patch.substring(lastPlusIndex + 1, lastDotIndex)
-            }
-          })
-
           for (const {pkg, version} of packages) {
-            const masterPatchFile = masterPatchFiles.find(file =>
+            const masterPatchFile = masterRepoPatchFiles.find(file =>
               file.startsWith(pkg)
             ) as string
 
@@ -75,26 +80,72 @@ async function run(): Promise<void> {
               .replace('@', '')
               .replace('+', '-')}-${version}`
 
+            const pullsList = await octokit.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              base: 'main'
+            })
+
+            const existingDeBotPullRequest = pullsList.data.find(
+              pr => pr.head.ref === deBotBranch
+            )
+
+            const existingPkgPullRequest = pullsList.data.find(
+              pr => pr.head.ref === pkgBranch
+            )
+
+            let pkgBranchDeleted = false
+
+            if (existingPkgPullRequest) {
+              try {
+                const patch = (
+                  await octokit.repos.getContent({
+                    owner,
+                    repo,
+                    ref: `heads/main`,
+                    path: masterFilePath
+                  })
+                ).data as {content: string}
+
+                const patchContent =
+                  Buffer.from(patch.content, 'base64').toString('utf8') || ''
+
+                if (patchContent === masterPatchContent) {
+                  await octokit.pulls.update({
+                    owner,
+                    repo,
+                    pull_number: existingPkgPullRequest.number,
+                    state: 'closed'
+                  })
+                  await octokit.git.deleteRef({
+                    owner,
+                    repo,
+                    ref: `heads/${pkgBranch}`
+                  })
+                  pkgBranchDeleted = true
+                  core.info(`deleted branch ${pkgBranch} and closed pr`)
+                }
+              } catch (error) {
+                /* empty */
+              }
+            } else {
+              try {
+                await octokit.git.deleteRef({
+                  owner,
+                  repo,
+                  ref: `heads/${pkgBranch}`
+                })
+                pkgBranchDeleted = true
+                core.info(`deleted branch ${pkgBranch}`)
+              } catch (error) {
+                /* empty */
+              }
+            }
+
             try {
-              const pullsList = await octokit.pulls.list({
-                owner,
-                repo,
-                state: 'open',
-                base: 'main'
-              })
-
-              const existingDeBotPullRequest = pullsList.data.find(
-                pr => pr.head.ref === deBotBranch
-              )
-
               if (existingDeBotPullRequest) {
-                const existingPkgPullRequest = pullsList.data.find(
-                  pr => pr.head.ref === pkgBranch
-                )
-
-                if (existingPkgPullRequest) {
-                  core.info(`try to detect pkg pr: ${pkgBranch}`)
-
+                if (existingPkgPullRequest && !pkgBranchDeleted) {
                   await octokit.pulls.update({
                     owner,
                     repo,
@@ -108,7 +159,6 @@ async function run(): Promise<void> {
                   })
                   core.info(`deleted branch ${pkgBranch} and closed pr`)
                 }
-
                 pkgBranch = deBotBranch
                 core.info(`use dependabot pr branch ${deBotBranch}`)
               }
