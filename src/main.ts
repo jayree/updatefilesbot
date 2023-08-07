@@ -14,8 +14,6 @@ async function run(): Promise<void> {
       .map(item => item.trim())
       .filter(item => item.length > 0)
 
-    core.info(`force Package: ${forcePkgArray.toString()}`)
-
     const GitHubAppId: string = core.getInput('GitHubAppId')
     const GitHubAppPrivateKey: string = core.getInput('GitHubAppPrivateKey')
 
@@ -61,219 +59,251 @@ async function run(): Promise<void> {
           core.info(`${owner}/${repo}`)
 
           for (const {pkg, version} of packages) {
-            const masterPatchFile = masterRepoPatchFiles.find(file =>
-              file.startsWith(pkg)
-            ) as string
+            try {
+              const forcePkg = forcePkgArray.includes(pkg)
 
-            const masterFilePath = join('patches', masterPatchFile)
+              const masterRepoPatchFile = masterRepoPatchFiles.find(file =>
+                file.startsWith(pkg)
+              ) as string
 
-            const masterPatchContent = (
-              await readFile(masterFilePath)
-            ).toString('utf8')
+              const masterRepoFilePath = join('patches', masterRepoPatchFile)
 
-            let branchExists = undefined
+              const masterRepoPatchContent = (
+                await readFile(masterRepoFilePath)
+              ).toString('utf8')
 
-            let pkgBranch = `updatepatchfilesbot-${pkg}`
-            const pkgName = pkg.split('+').join('/')
+              let branchExists = undefined
 
-            const deBotBranch = `dependabot-npm_and_yarn-${pkg
-              .replace('@', '')
-              .replace('+', '-')}-${version}`
+              let pkgBranch = `updatepatchfilesbot-${pkg}`
+              const pkgName = pkg.split('+').join('/')
 
-            const pullsList = await octokit.pulls.list({
-              owner,
-              repo,
-              state: 'open',
-              base: 'main'
-            })
+              const deBotBranch = `dependabot-npm_and_yarn-${pkg
+                .replace('@', '')
+                .replace('+', '-')}-${version}`
 
-            const existingDeBotPullRequest = pullsList.data.find(
-              pr => pr.head.ref === deBotBranch
-            )
+              core.info(
+                JSON.stringify({
+                  pkg,
+                  version,
+                  forcePkg,
+                  pkgName,
+                  pkgBranch,
+                  deBotBranch
+                })
+              )
 
-            const existingPkgPullRequest = pullsList.data.find(
-              pr => pr.head.ref === pkgBranch
-            )
+              const pullsList = await octokit.pulls.list({
+                owner,
+                repo,
+                state: 'open',
+                base: 'main'
+              })
 
-            let pkgBranchDeleted = false
+              let existingPkgPullRequest = pullsList.data.find(
+                pr => pr.head.ref === pkgBranch
+              )
 
-            if (existingPkgPullRequest) {
-              try {
-                const patch = (
+              if (existingPkgPullRequest) {
+                const patchFiles = (
                   await octokit.repos.getContent({
                     owner,
                     repo,
                     ref: `heads/main`,
-                    path: masterFilePath
+                    path: 'patches'
+                  })
+                ).data as {name: string; path: string; sha: string}[]
+
+                const patchFile = patchFiles.find(
+                  file =>
+                    file.name.startsWith(pkg) &&
+                    file.path === masterRepoFilePath
+                )
+
+                if (patchFile) {
+                  const patch = (
+                    await octokit.repos.getContent({
+                      owner,
+                      repo,
+                      ref: `heads/main`,
+                      path: masterRepoFilePath
+                    })
+                  ).data as {content: string}
+
+                  const patchContent =
+                    Buffer.from(patch.content, 'base64').toString('utf8') || ''
+
+                  if (patchContent === masterRepoPatchContent) {
+                    await octokit.pulls.update({
+                      owner,
+                      repo,
+                      pull_number: existingPkgPullRequest.number,
+                      state: 'closed'
+                    })
+                    await octokit.git.deleteRef({
+                      owner,
+                      repo,
+                      ref: `heads/${pkgBranch}`
+                    })
+                    existingPkgPullRequest = undefined
+                    core.info(`deleted branch ${pkgBranch} and closed pr`)
+                  }
+                }
+              } else {
+                try {
+                  await octokit.git.deleteRef({
+                    owner,
+                    repo,
+                    ref: `heads/${pkgBranch}`
+                  })
+                  existingPkgPullRequest = undefined
+                  core.info(`deleted branch ${pkgBranch}`)
+                } catch (error) {
+                  /* empty */
+                }
+              }
+
+              const existingDeBotPullRequest = pullsList.data.find(
+                pr => pr.head.ref === deBotBranch
+              )
+
+              if (existingDeBotPullRequest) {
+                if (existingPkgPullRequest) {
+                  await octokit.pulls.update({
+                    owner,
+                    repo,
+                    pull_number: existingPkgPullRequest.number,
+                    state: 'closed'
+                  })
+                  await octokit.git.deleteRef({
+                    owner,
+                    repo,
+                    ref: `heads/${pkgBranch}`
+                  })
+                  existingPkgPullRequest = undefined
+                  core.info(`deleted branch ${pkgBranch} and closed pr`)
+                }
+                pkgBranch = deBotBranch
+                core.info(`use dependabot pr branch ${deBotBranch}`)
+              }
+
+              try {
+                branchExists = await octokit.repos.getBranch({
+                  owner,
+                  repo,
+                  branch: pkgBranch
+                })
+              } catch (error) {
+                /* empty */
+              }
+
+              const patchFiles = (
+                await octokit.repos.getContent({
+                  owner,
+                  repo,
+                  ref: branchExists ? `heads/${pkgBranch}` : `heads/main`,
+                  path: 'patches'
+                })
+              ).data as {name: string; path: string; sha: string}[]
+
+              if (!patchFiles.find(file => file.name.startsWith(pkg))) {
+                core.info(`no patch for '${pkgName}' found.`)
+                if (!forcePkg) {
+                  continue
+                }
+              }
+
+              const patchFile = patchFiles.find(
+                file =>
+                  file.name.startsWith(pkg) && file.path === masterRepoFilePath
+              )
+
+              if (patchFile) {
+                const patch = (
+                  await octokit.repos.getContent({
+                    owner,
+                    repo,
+                    ref: branchExists ? `heads/${pkgBranch}` : `heads/main`,
+                    path: patchFile.path
                   })
                 ).data as {content: string}
 
                 const patchContent =
                   Buffer.from(patch.content, 'base64').toString('utf8') || ''
 
-                if (patchContent === masterPatchContent) {
-                  await octokit.pulls.update({
-                    owner,
-                    repo,
-                    pull_number: existingPkgPullRequest.number,
-                    state: 'closed'
-                  })
-                  await octokit.git.deleteRef({
-                    owner,
-                    repo,
-                    ref: `heads/${pkgBranch}`
-                  })
-                  pkgBranchDeleted = true
-                  core.info(`deleted branch ${pkgBranch} and closed pr`)
+                if (patchContent === masterRepoPatchContent) {
+                  if (branchExists) {
+                    core.info(
+                      `no updated patch for package '${pkgName}' found.`
+                    )
+                  } else {
+                    core.info(`no new patch for package '${pkgName}' found.`)
+                  }
+                  continue
                 }
-              } catch (error) {
-                /* empty */
               }
-            } else {
-              try {
-                await octokit.git.deleteRef({
+
+              if (!branchExists) {
+                const mainSHA = (
+                  await octokit.git.getRef({
+                    owner,
+                    repo,
+                    ref: `heads/main`
+                  })
+                ).data.object.sha
+                await octokit.git.createRef({
                   owner,
                   repo,
-                  ref: `heads/${pkgBranch}`
+                  ref: `refs/heads/${pkgBranch}`,
+                  sha: mainSHA
                 })
-                pkgBranchDeleted = true
-                core.info(`deleted branch ${pkgBranch}`)
-              } catch (error) {
-                /* empty */
+                core.info(`create branch '${pkgBranch}'.`)
               }
-            }
 
-            try {
-              if (existingDeBotPullRequest) {
-                if (existingPkgPullRequest && !pkgBranchDeleted) {
-                  await octokit.pulls.update({
-                    owner,
-                    repo,
-                    pull_number: existingPkgPullRequest.number,
-                    state: 'closed'
-                  })
-                  await octokit.git.deleteRef({
-                    owner,
-                    repo,
-                    ref: `heads/${pkgBranch}`
-                  })
-                  core.info(`deleted branch ${pkgBranch} and closed pr`)
-                }
-                pkgBranch = deBotBranch
-                core.info(`use dependabot pr branch ${deBotBranch}`)
+              const obsoletePatchFile = patchFiles.find(
+                file =>
+                  file.name.startsWith(pkg) && file.path !== masterRepoFilePath
+              )
+
+              if (obsoletePatchFile) {
+                await octokit.repos.deleteFile({
+                  owner,
+                  repo,
+                  path: obsoletePatchFile.path,
+                  message: `chore(patch): remove obsolete patch for package ${pkgName}`,
+                  sha: obsoletePatchFile.sha,
+                  branch: pkgBranch
+                })
+                core.info(`create patch for pgk '${pkgName}'`)
+              } else {
+                core.info(`update patch for pkg '${pkgName}'`)
               }
-            } catch (error) {
-              /* empty */
-            }
 
-            try {
-              branchExists = await octokit.repos.getBranch({
+              await octokit.repos.createOrUpdateFileContents({
                 owner,
                 repo,
+                path: masterRepoFilePath,
+                message: `chore(patch): ${
+                  obsoletePatchFile || forcePkg ? 'create' : 'update'
+                } patch for package ${pkgName}`,
+                content: Buffer.from(masterRepoPatchContent).toString('base64'),
+                sha: patchFile?.sha,
                 branch: pkgBranch
               })
-            } catch (error) {
-              /* empty */
-            }
 
-            const patchFiles = (
-              await octokit.repos.getContent({
-                owner,
-                repo,
-                ref: branchExists ? `heads/${pkgBranch}` : `heads/main`,
-                path: 'patches'
-              })
-            ).data as {name: string; path: string; sha: string}[]
-
-            if (!patchFiles.find(file => file.name.startsWith(pkg))) {
-              core.info(`no patch for '${pkgName}' found.`)
-              if (!forcePkgArray.includes(pkg)) {
-                continue
-              }
-            }
-
-            const patchFile = patchFiles.find(
-              file => file.name.startsWith(pkg) && file.path === masterFilePath
-            )
-
-            if (patchFile) {
-              const patch = (
-                await octokit.repos.getContent({
-                  owner,
-                  repo,
-                  ref: branchExists ? `heads/${pkgBranch}` : `heads/main`,
-                  path: patchFile.path
-                })
-              ).data as {content: string}
-
-              const patchContent =
-                Buffer.from(patch.content, 'base64').toString('utf8') || ''
-
-              if (patchContent === masterPatchContent) {
-                if (branchExists) {
-                  core.info(`no updated patch for package '${pkgName}' found.`)
-                } else {
-                  core.info(`no new patch for package '${pkgName}' found.`)
+              if (!existingPkgPullRequest) {
+                if (!existingDeBotPullRequest) {
+                  await octokit.pulls.create({
+                    owner,
+                    repo,
+                    title: `chore(patch): update patch for package ${pkgName}`,
+                    head: pkgBranch,
+                    base: 'main'
+                  })
                 }
-                continue
               }
-            }
-
-            if (!branchExists) {
-              const mainSHA = (
-                await octokit.git.getRef({
-                  owner,
-                  repo,
-                  ref: `heads/main`
-                })
-              ).data.object.sha
-              await octokit.git.createRef({
-                owner,
-                repo,
-                ref: `refs/heads/${pkgBranch}`,
-                sha: mainSHA
-              })
-              core.info(`create branch '${pkgBranch}'.`)
-            }
-
-            const obsoletePatchFile = patchFiles.find(
-              file => file.name.startsWith(pkg) && file.path !== masterFilePath
-            )
-
-            if (obsoletePatchFile) {
-              await octokit.repos.deleteFile({
-                owner,
-                repo,
-                path: obsoletePatchFile.path,
-                message: `chore(patch): remove obsolete patch for package ${pkgName}`,
-                sha: obsoletePatchFile.sha,
-                branch: pkgBranch
-              })
-              core.info(`create patch for pgk '${pkgName}'`)
-            } else {
-              core.info(`update patch for pkg '${pkgName}'`)
-            }
-
-            await octokit.repos.createOrUpdateFileContents({
-              owner,
-              repo,
-              path: masterFilePath,
-              message: `chore(patch): update patch for package ${pkgName}`,
-              content: Buffer.from(masterPatchContent).toString('base64'),
-              sha: patchFile?.sha,
-              branch: pkgBranch
-            })
-
-            try {
-              await octokit.pulls.create({
-                owner,
-                repo,
-                title: `chore(patch): update patch for package ${pkgName}`,
-                head: pkgBranch,
-                base: 'main'
-              })
-            } catch (error) {
-              /* empty */
+            } catch (err) {
+              const error = err as Error
+              core.error(error.message)
             }
           }
         } catch (err) {
