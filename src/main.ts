@@ -77,21 +77,6 @@ async function run(): Promise<void> {
               let pkgBranch = `updatepatchfilesbot-${pkg}`
               const pkgName = pkg.split('+').join('/')
 
-              const deBotBranch = `dependabot-npm_and_yarn-${pkg
-                .replace('@', '')
-                .replace('+', '-')}-${version}`
-
-              core.info(
-                JSON.stringify({
-                  pkg,
-                  version,
-                  forcePkg,
-                  pkgName,
-                  pkgBranch,
-                  deBotBranch
-                })
-              )
-
               const pullsList = await octokit.pulls.list({
                 owner,
                 repo,
@@ -101,6 +86,25 @@ async function run(): Promise<void> {
 
               let existingPkgPullRequest = pullsList.data.find(
                 pr => pr.head.ref === pkgBranch
+              )
+
+              const existingDeBotPullRequest = pullsList.data.find(pr =>
+                pr.head.ref.startsWith(
+                  `dependabot-npm_and_yarn-${pkg
+                    .replace('@', '')
+                    .replace('+', '-')}-`
+                )
+              )
+
+              core.info(
+                JSON.stringify({
+                  pkg,
+                  version,
+                  forcePkg,
+                  pkgName,
+                  pkgBranch,
+                  deBotBranch: existingDeBotPullRequest?.head.ref
+                })
               )
 
               if (existingPkgPullRequest) {
@@ -162,10 +166,6 @@ async function run(): Promise<void> {
                 }
               }
 
-              const existingDeBotPullRequest = pullsList.data.find(
-                pr => pr.head.ref === deBotBranch
-              )
-
               if (existingDeBotPullRequest) {
                 if (existingPkgPullRequest) {
                   await octokit.pulls.update({
@@ -182,8 +182,8 @@ async function run(): Promise<void> {
                   existingPkgPullRequest = undefined
                   core.info(`deleted branch ${pkgBranch} and closed pr`)
                 }
-                pkgBranch = deBotBranch
-                core.info(`use dependabot pr branch ${deBotBranch}`)
+                pkgBranch = existingDeBotPullRequest.head.ref
+                core.info(`use dependabot pr branch ${pkgBranch}`)
               }
 
               try {

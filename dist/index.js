@@ -117,17 +117,6 @@ function run() {
                                         let branchExists = undefined;
                                         let pkgBranch = `updatepatchfilesbot-${pkg}`;
                                         const pkgName = pkg.split('+').join('/');
-                                        const deBotBranch = `dependabot-npm_and_yarn-${pkg
-                                            .replace('@', '')
-                                            .replace('+', '-')}-${version}`;
-                                        core.info(JSON.stringify({
-                                            pkg,
-                                            version,
-                                            forcePkg,
-                                            pkgName,
-                                            pkgBranch,
-                                            deBotBranch
-                                        }));
                                         const pullsList = yield octokit.pulls.list({
                                             owner,
                                             repo,
@@ -135,6 +124,17 @@ function run() {
                                             base: 'main'
                                         });
                                         let existingPkgPullRequest = pullsList.data.find(pr => pr.head.ref === pkgBranch);
+                                        const existingDeBotPullRequest = pullsList.data.find(pr => pr.head.ref.startsWith(`dependabot-npm_and_yarn-${pkg
+                                            .replace('@', '')
+                                            .replace('+', '-')}-`));
+                                        core.info(JSON.stringify({
+                                            pkg,
+                                            version,
+                                            forcePkg,
+                                            pkgName,
+                                            pkgBranch,
+                                            deBotBranch: existingDeBotPullRequest === null || existingDeBotPullRequest === void 0 ? void 0 : existingDeBotPullRequest.head.ref
+                                        }));
                                         if (existingPkgPullRequest) {
                                             const patchFiles = (yield octokit.repos.getContent({
                                                 owner,
@@ -183,7 +183,6 @@ function run() {
                                                 /* empty */
                                             }
                                         }
-                                        const existingDeBotPullRequest = pullsList.data.find(pr => pr.head.ref === deBotBranch);
                                         if (existingDeBotPullRequest) {
                                             if (existingPkgPullRequest) {
                                                 yield octokit.pulls.update({
@@ -200,8 +199,8 @@ function run() {
                                                 existingPkgPullRequest = undefined;
                                                 core.info(`deleted branch ${pkgBranch} and closed pr`);
                                             }
-                                            pkgBranch = deBotBranch;
-                                            core.info(`use dependabot pr branch ${deBotBranch}`);
+                                            pkgBranch = existingDeBotPullRequest.head.ref;
+                                            core.info(`use dependabot pr branch ${pkgBranch}`);
                                         }
                                         try {
                                             branchExists = yield octokit.repos.getBranch({
