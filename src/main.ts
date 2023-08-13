@@ -295,7 +295,9 @@ async function run(): Promise<void> {
                   await octokit.pulls.create({
                     owner,
                     repo,
-                    title: `chore(patch): update patch for package ${pkgName}`,
+                    title: `chore(patch): ${
+                      obsoletePatchFile || forcePkg ? 'create' : 'update'
+                    } patch for package ${pkgName}`,
                     head: pkgBranch,
                     base: 'main'
                   })
