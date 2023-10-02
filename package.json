@@ -30,7 +30,7 @@
   "dependencies": {
     "@actions/core": "^1.10.0",
     "@actions/github": "^5.1.1",
-    "@octokit/app": "^14.0.0",
+    "@octokit/app": "^14.0.1",
     "@octokit/rest": "^20.0.1",
     "node-fetch": "^3.3.2"
   },
